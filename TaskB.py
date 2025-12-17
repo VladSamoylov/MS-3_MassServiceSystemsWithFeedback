@@ -21,7 +21,6 @@ class TwoStationSystem:
         self.env = env
         self.stationFirst = simpy.PriorityResource(env, capacity = 1)
         self.stationSecond = simpy.Resource(env, capacity = 1)
-        self.stationSecondWorking = False
         self.stationSecondBusy = env.event()
         self.queueFirstLen = []
         self.queueSecondLen = []
@@ -38,13 +37,11 @@ class TwoStationSystem:
             print(f"{COLOR_ANSI_YELLOW}{self.env.now:>8.2f}{COLOR_ANSI_RESET}: Заявка {COLOR_ANSI_BLUE}{reqId:<4}{COLOR_ANSI_RESET} "
                   f"({COLOR_ANSI_GREEN}{category}{COLOR_ANSI_RESET} типу) {COLOR_ANSI_YELLOW}почала{COLOR_ANSI_RESET} обслуговування " 
                   f"(очікувала {COLOR_ANSI_RED}{waitTime}{COLOR_ANSI_RESET} сек)")
-            self.stationSecondWorking = True
             self.stationSecondBusy.succeed()
             self.stationSecondBusy = self.env.event()
             yield self.env.timeout(CategoryParams[category]['SERVICETIME'])
             print(f"{COLOR_ANSI_YELLOW}{self.env.now:>8.2f}{COLOR_ANSI_RESET}: Заявка {COLOR_ANSI_BLUE}{reqId:<4}{COLOR_ANSI_RESET} "
                   f"({COLOR_ANSI_GREEN}{category}{COLOR_ANSI_RESET} типу) {COLOR_ANSI_GREEN}закінчила{COLOR_ANSI_RESET} обслуговування")
-            self.stationSecondWorking = False
             if self.currentFirstProcess is not None:
                 self.currentFirstProcess.interrupt()
             self.secondProcessed += 1
@@ -62,14 +59,13 @@ class TwoStationSystem:
         while remainingWork > 0:
             with self.stationFirst.request(priority = priority) as req:
                 queueStart = self.env.now
-                if not self.stationSecondWorking:
+                if self.stationSecond.count == 0:
                     print(f"{COLOR_ANSI_YELLOW}{self.env.now:>8.2f}{COLOR_ANSI_RESET}: Заявка {COLOR_ANSI_BLUE}{reqId:<4}{COLOR_ANSI_RESET} "
                         f"({COLOR_ANSI_GREEN}{category}{COLOR_ANSI_RESET} типу) {COLOR_ANSI_FIOL}чекає{COLOR_ANSI_RESET} поки станція 2 почне роботу")
                     yield self.stationSecondBusy
                 try:
                     yield req
-                    if not self.stationSecondWorking: 
-                        req.resource.release(req)
+                    if self.stationSecond.count == 0:
                         continue
                     self.currentFirstProcess = self.env.active_process
                     waitTime = self.env.now - queueStart
@@ -94,6 +90,7 @@ class TwoStationSystem:
                     if startWork is None:
                         print(f"{COLOR_ANSI_YELLOW}{self.env.now:>8.2f}{COLOR_ANSI_RESET}: Заявка {COLOR_ANSI_BLUE}{reqId:<4}{COLOR_ANSI_RESET} "
                         f"({COLOR_ANSI_GREEN}{category}{COLOR_ANSI_RESET} типу) {COLOR_ANSI_RED}прервана, бо станція 2 вільна{COLOR_ANSI_RESET} ")
+                        self.currentFirstProcess = None
                         continue
                     worked = self.env.now - startWork
                     remainingWork -= worked
@@ -113,7 +110,6 @@ class TwoStationSystem:
         # if(reqId == 66):
         #     print(f"66 (1) queue wait + interrupt - {waitTimesInterrupt + waitTime}")
         #     print(f"66 (1) Total wait - {self.env.now - (arriveTime + CategoryParams[category]['SERVICETIME']) }")
-
 
 def RequirementGenerator(env, system, category):
     reqId = 1

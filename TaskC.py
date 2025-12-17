@@ -21,7 +21,6 @@ class TwoStationSystem:
         self.env = env
         self.stationFirst = simpy.PriorityResource(env, capacity = 1)
         self.stationSecond = simpy.Resource(env, capacity = 1)
-        self.stationSecondWorking = False
         self.stationSecondBusy = env.event()
         self.queueFirstLen = []
         self.queueSecondLen = []
@@ -35,11 +34,12 @@ class TwoStationSystem:
         
     def SecondProcess(self, reqId, category):
         queueStart = self.env.now
+        priority = self.env.now
         # print(f"count  -- {self.stationFirst.count}")
         # print(f"queue to first :  {len(self.stationFirst.queue)}")
         # print(f"queue to second :  {len(self.stationSecond.queue)}")
         if self.stationFirst.count == 0:
-            req = self.stationFirst.request(priority = 2)
+            req = self.stationFirst.request(priority = priority)
             station = 1
             # print(f"choose  first")
             self.type2First.append(req)
@@ -49,7 +49,7 @@ class TwoStationSystem:
             # print(f"choose  second")
             self.type2Second.append(req)
         else:
-            req = self.stationFirst.request(priority = 2)
+            req = self.stationFirst.request(priority = priority)
             station = 1
             # print(f"choose  first")
             self.type2First.append(req)
@@ -59,15 +59,14 @@ class TwoStationSystem:
             f"({COLOR_ANSI_GREEN}{category}{COLOR_ANSI_RESET} типу) {COLOR_ANSI_YELLOW}почала{COLOR_ANSI_RESET} обслуговування на приладі ({COLOR_ANSI_GREEN}{station}{COLOR_ANSI_RESET}) " 
             f"(очікувала {COLOR_ANSI_RED}{waitTime}{COLOR_ANSI_RESET} сек)")
         if station == 2:
-            self.stationSecondWorking = True
             self.stationSecondBusy.succeed()
             self.stationSecondBusy = self.env.event()
         yield self.env.timeout(CategoryParams[category]['SERVICETIME'])
         print(f"{COLOR_ANSI_YELLOW}{self.env.now:>8.2f}{COLOR_ANSI_RESET}: Заявка {COLOR_ANSI_BLUE}{reqId:<4}{COLOR_ANSI_RESET} "
             f"({COLOR_ANSI_GREEN}{category}{COLOR_ANSI_RESET} типу) {COLOR_ANSI_GREEN}закінчила{COLOR_ANSI_RESET} обслуговування на приладі ({COLOR_ANSI_GREEN}{station}{COLOR_ANSI_RESET})")
-        if station == 2: self.stationSecondWorking = False
-        if self.currentFirstProcess is not None:
-            self.currentFirstProcess.interrupt()
+        if station == 2:
+            if self.currentFirstProcess is not None:
+                self.currentFirstProcess.interrupt()
         self.secondProcessed += 1
 
         if station == 1:
@@ -79,19 +78,18 @@ class TwoStationSystem:
 
         self.waitTimes[category].append(waitTime)
         
-
     def FirstProcess(self, reqId, category):
         arriveTime = self.env.now
         remainingWork = CategoryParams[category]['SERVICETIME']
         interrupt = False
         startWork = None
-        priority = 2
+        priority = arriveTime
         waitTimesInterrupt = 0
         stationWait = 0
         totalStationWaits = 0
 
         while remainingWork > 0:
-            if not self.stationSecondWorking:
+            if self.stationSecond.count == 0 and not any(req in self.type2Second for req in self.stationSecond.users):
                 print(f"{COLOR_ANSI_YELLOW}{self.env.now:>8.2f}{COLOR_ANSI_RESET}: Заявка {COLOR_ANSI_BLUE}{reqId:<4}{COLOR_ANSI_RESET} "
                     f"({COLOR_ANSI_GREEN}{category}{COLOR_ANSI_RESET} типу) {COLOR_ANSI_FIOL}чекає{COLOR_ANSI_RESET} поки станція 2 почне роботу")
                 stationStart = self.env.now
@@ -100,17 +98,15 @@ class TwoStationSystem:
                 self.waitingSecond -= 1
                 stationWait = self.env.now - stationStart
                 totalStationWaits += stationWait
-                #if(reqId == 66): print(f"{COLOR_ANSI_RED}ПОТОЧНЕ ОЧІКУВАННЯ 66 СТАНЦІЇ {stationWait} : {totalStationWaits}{COLOR_ANSI_RESET}")
+                #if(reqId == 10): print(f"{COLOR_ANSI_RED}ПОТОЧНЕ ОЧІКУВАННЯ 10 СТАНЦІЇ {stationWait} : {totalStationWaits}{COLOR_ANSI_RESET}")
                 continue
             with self.stationFirst.request(priority = priority) as req:
                 try:
                     queueStart = self.env.now
                     yield req
-                    if not self.stationSecondWorking: 
-                        req.resource.release(req)
+                    if self.stationSecond.count == 0 and not any(req in self.type2Second for req in self.stationSecond.users): 
                         totalStationWaits += (self.env.now - queueStart)
-                        #if(reqId == 66): print(f"{COLOR_ANSI_YELLOW}ПОТОЧНЕ ОЧІКУВАННЯ 66 СТАНЦІЇ {stationWait} : {totalStationWaits}{COLOR_ANSI_RESET}")
-                        priority = 1
+                        #if(reqId == 10): print(f"{COLOR_ANSI_YELLOW}ПОТОЧНЕ ОЧІКУВАННЯ 10 СТАНЦІЇ {stationWait} : {totalStationWaits}{COLOR_ANSI_RESET}")
                         continue
                     self.currentFirstProcess = self.env.active_process
                     waitTime = (self.env.now - queueStart) + totalStationWaits
@@ -136,6 +132,7 @@ class TwoStationSystem:
                     if startWork is None:
                         print(f"{COLOR_ANSI_YELLOW}{self.env.now:>8.2f}{COLOR_ANSI_RESET}: Заявка {COLOR_ANSI_BLUE}{reqId:<4}{COLOR_ANSI_RESET} "
                         f"({COLOR_ANSI_GREEN}{category}{COLOR_ANSI_RESET} типу) {COLOR_ANSI_RED}прервана, бо станція 2 вільна{COLOR_ANSI_RESET} ")
+                        self.currentFirstProcess = None
                         continue
                     worked = self.env.now - startWork
                     remainingWork -= worked
@@ -152,10 +149,9 @@ class TwoStationSystem:
                     self.currentFirstProcess = None
         
         self.waitTimes[category].append(waitTimesInterrupt + waitTime)
-        # if(reqId == 66):
-        #     print(f"66 (1) queue wait + interrupt - {waitTimesInterrupt + waitTime}")
-        #     print(f"66 (1) Total wait - {self.env.now - (arriveTime + CategoryParams[category]['SERVICETIME']) }")
-
+        # if(reqId == 9):
+        #     print(f"9 (1) queue wait + interrupt - {waitTimesInterrupt + waitTime}")
+        #     print(f"9 (1) Total wait - {self.env.now - (arriveTime + CategoryParams[category]['SERVICETIME']) }")
 
 def RequirementGenerator(env, system, category):
     reqId = 1
