@@ -55,7 +55,6 @@ class TwoStationSystem:
         interrupt = False
         startWork = None
         priority = 1
-        waitTimesInterrupt = 0
 
         totalWait = 0
         totalStationWaits = 0
@@ -71,7 +70,6 @@ class TwoStationSystem:
                         totalStationWaits = 0
                         if self.stationSecond.count > 0:
                             self.currentFirstProcess = self.env.active_process
-                            waitTime = self.env.now - queueStart
                             if not interrupt:
                                 print(f"{COLOR_ANSI_YELLOW}{self.env.now:>8.2f}{COLOR_ANSI_RESET}: Заявка {COLOR_ANSI_BLUE}{reqId:<4}{COLOR_ANSI_RESET} "
                                     f"({COLOR_ANSI_GREEN}{category}{COLOR_ANSI_RESET} типу) {COLOR_ANSI_YELLOW}почала{COLOR_ANSI_RESET} обслуговування " 
